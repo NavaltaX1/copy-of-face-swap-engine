@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1784858018186,
+      "tag": "0000_cool_the_phantom",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1784858308254,
+      "tag": "0001_tiresome_cloak",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1784863286397,
+      "tag": "0002_sour_grey_gargoyle",
+      "breakpoints": true
+    }
+  ]
+}

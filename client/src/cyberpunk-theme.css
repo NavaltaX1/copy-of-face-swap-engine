@@ -1,0 +1,305 @@
+/* Cyberpunk Theme - Neon Aesthetic */
+
+:root {
+  /* Neon Colors */
+  --neon-pink: #ff006e;
+  --neon-cyan: #00f5ff;
+  --neon-purple: #b537f2;
+  --neon-green: #39ff14;
+  --neon-yellow: #ffff00;
+  --neon-orange: #ff6600;
+
+  /* Background Colors */
+  --bg-dark: #0a0e27;
+  --bg-darker: #050812;
+  --bg-card: #1a1f3a;
+  --bg-input: #0f1428;
+
+  /* Text Colors */
+  --text-primary: #00f5ff;
+  --text-secondary: #ff006e;
+  --text-tertiary: #b537f2;
+  --text-muted: #666699;
+
+  /* Glow Effects */
+  --glow-sm: 0 0 10px rgba(0, 245, 255, 0.3);
+  --glow-md: 0 0 20px rgba(0, 245, 255, 0.5);
+  --glow-lg: 0 0 30px rgba(0, 245, 255, 0.7);
+  --glow-pink: 0 0 20px rgba(255, 0, 110, 0.6);
+  --glow-purple: 0 0 20px rgba(181, 55, 242, 0.6);
+}
+
+/* Global Styles */
+body {
+  background: linear-gradient(135deg, var(--bg-darker) 0%, var(--bg-dark) 100%);
+  color: var(--text-primary);
+  font-family: "Inter", "Courier New", monospace;
+  letter-spacing: 0.05em;
+}
+
+/* HUD-Style Borders and Corners */
+.hud-border {
+  position: relative;
+  border: 2px solid var(--neon-cyan);
+  box-shadow: var(--glow-md), inset 0 0 10px rgba(0, 245, 255, 0.1);
+}
+
+.hud-border::before,
+.hud-border::after {
+  content: "";
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--neon-cyan);
+}
+
+.hud-border::before {
+  top: -8px;
+  left: -8px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.hud-border::after {
+  bottom: -8px;
+  right: -8px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Neon Text Effects */
+.neon-text-cyan {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+}
+
+.neon-text-pink {
+  color: var(--neon-pink);
+  text-shadow: 0 0 10px var(--neon-pink), 0 0 20px var(--neon-pink);
+}
+
+.neon-text-purple {
+  color: var(--neon-purple);
+  text-shadow: 0 0 10px var(--neon-purple), 0 0 20px var(--neon-purple);
+}
+
+.neon-text-green {
+  color: var(--neon-green);
+  text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green);
+}
+
+/* Buttons */
+.btn-neon {
+  background: transparent;
+  border: 2px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  padding: 12px 24px;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: all 0.3s ease;
+  box-shadow: var(--glow-sm);
+  font-size: 14px;
+}
+
+.btn-neon:hover {
+  background: rgba(0, 245, 255, 0.1);
+  box-shadow: var(--glow-lg);
+  transform: scale(1.02);
+}
+
+.btn-neon:active {
+  transform: scale(0.98);
+}
+
+.btn-neon-pink {
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+  box-shadow: var(--glow-pink);
+}
+
+.btn-neon-pink:hover {
+  background: rgba(255, 0, 110, 0.1);
+  box-shadow: 0 0 30px rgba(255, 0, 110, 0.7);
+}
+
+/* Input Fields */
+.input-neon {
+  background: var(--bg-input);
+  border: 2px solid var(--neon-cyan);
+  color: var(--text-primary);
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 0 10px rgba(0, 245, 255, 0.05);
+}
+
+.input-neon:focus {
+  outline: none;
+  border-color: var(--neon-pink);
+  box-shadow: inset 0 0 10px rgba(0, 245, 255, 0.1), var(--glow-pink);
+}
+
+.input-neon::placeholder {
+  color: var(--text-muted);
+}
+
+/* Cards */
+.card-neon {
+  background: var(--bg-card);
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 0 20px rgba(0, 245, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.card-neon:hover {
+  border-color: rgba(0, 245, 255, 0.6);
+  box-shadow: 0 0 30px rgba(0, 245, 255, 0.2);
+}
+
+/* Progress Bar */
+.progress-neon {
+  background: var(--bg-input);
+  border: 1px solid var(--neon-cyan);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: inset 0 0 10px rgba(0, 245, 255, 0.1);
+}
+
+.progress-neon-fill {
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink));
+  height: 100%;
+  border-radius: 4px;
+  box-shadow: 0 0 10px var(--neon-cyan);
+  transition: width 0.3s ease;
+}
+
+/* Toggle Switch */
+.toggle-neon {
+  position: relative;
+  display: inline-flex;
+  width: 60px;
+  height: 32px;
+  background: var(--bg-input);
+  border: 2px solid var(--neon-cyan);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.toggle-neon.active {
+  background: rgba(0, 245, 255, 0.2);
+  border-color: var(--neon-pink);
+}
+
+.toggle-neon::after {
+  content: "";
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 10px var(--neon-cyan);
+}
+
+.toggle-neon.active::after {
+  left: 32px;
+  background: var(--neon-pink);
+  box-shadow: 0 0 10px var(--neon-pink);
+}
+
+/* Divider */
+.divider-neon {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+  margin: 24px 0;
+  box-shadow: 0 0 10px rgba(0, 245, 255, 0.3);
+}
+
+/* Status Badge */
+.badge-neon {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-processing {
+  background: rgba(0, 245, 255, 0.2);
+  color: var(--neon-cyan);
+  border: 1px solid var(--neon-cyan);
+  box-shadow: var(--glow-sm);
+  animation: pulse 2s infinite;
+}
+
+.badge-completed {
+  background: rgba(57, 255, 20, 0.2);
+  color: var(--neon-green);
+  border: 1px solid var(--neon-green);
+}
+
+.badge-failed {
+  background: rgba(255, 0, 110, 0.2);
+  color: var(--neon-pink);
+  border: 1px solid var(--neon-pink);
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 245, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 245, 255, 0.6);
+  }
+}
+
+/* Animation - Scan Line */
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.scanline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+  animation: scanline 3s infinite;
+  pointer-events: none;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .hud-border::before,
+  .hud-border::after {
+    width: 12px;
+    height: 12px;
+  }
+
+  .hud-border::before {
+    top: -6px;
+    left: -6px;
+  }
+
+  .hud-border::after {
+    bottom: -6px;
+    right: -6px;
+  }
+}
