@@ -127,6 +127,13 @@ export const faceSwapRouter = router({
           });
         }
       } catch (error) {
+        // Errors from the inner Replicate try/catch are already a well-formed
+        // TRPCError with the job already marked "failed" — rethrow as-is
+        // instead of wrapping again, which would erase the original code and
+        // double-prefix the message.
+        if (error instanceof TRPCError) {
+          throw error;
+        }
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Failed to submit face swap job: ${(error as Error).message}`,
