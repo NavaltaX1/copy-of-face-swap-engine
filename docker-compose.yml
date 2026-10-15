@@ -1,0 +1,93 @@
+# Local/self-hosted stack: the app, its database, and a one-shot migration job.
+#
+#   docker compose run --rm migrate   # apply the drizzle migrations
+#   docker compose up -d app          # start the API + client
+#
+# Secrets come from .env (see .env.example). Nothing here hard-codes a
+# credential that would ship to production.
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-faceswap}
+      MYSQL_USER: ${MYSQL_USER:-faceswap}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-faceswap}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+    volumes:
+      - db-data:/var/lib/mysql
+    # Not published by default: only the app and the migration job need it.
+    # Uncomment to inspect the database from the host.
+    # ports:
+    #   - "3306:3306"
+    healthcheck:
+      # Without this, the app starts before MySQL finishes initialising and its
+      # first query fails against a server that is seconds away from being
+      # ready.
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "127.0.0.1",
+          "-u",
+          "root",
+          "-p${MYSQL_ROOT_PASSWORD:-rootpassword}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      target: runtime
+      args:
+        # Baked into the client bundle at build time; changing these requires a
+        # rebuild, not a restart.
+        VITE_APP_ID: ${VITE_APP_ID:-}
+        VITE_FRONTEND_FORGE_API_URL: ${VITE_FRONTEND_FORGE_API_URL:-}
+        VITE_FRONTEND_FORGE_API_KEY: ${VITE_FRONTEND_FORGE_API_KEY:-}
+        VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-}
+    restart: unless-stopped
+    # Reap orphaned children and forward signals properly to PID 1.
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-mysql://faceswap:faceswap@db:3306/faceswap}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - see .env.example}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL:-}
+      OWNER_OPEN_ID: ${OWNER_OPEN_ID:-}
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      REPLICATE_WEBHOOK_SECRET: ${REPLICATE_WEBHOOK_SECRET:-}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+  # One-shot. Runs to completion and exits; `app` waits for a clean exit.
+  migrate:
+    build:
+      context: .
+      target: migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-mysql://faceswap:faceswap@db:3306/faceswap}
+
+volumes:
+  db-data:
