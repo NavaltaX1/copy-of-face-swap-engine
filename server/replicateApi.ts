@@ -20,7 +20,11 @@ export function getReplicateClient(): Replicate {
     if (!apiToken) {
       throw new Error("REPLICATE_API_TOKEN environment variable not set");
     }
-    replicateClient = new Replicate({ auth: apiToken });
+    // REPLICATE_API_BASE_URL exists so a deployment can route through its own
+    // proxy, and so the job pipeline can be exercised end to end against a
+    // stand-in. Unset, the SDK's own default (api.replicate.com) applies.
+    const baseUrl = process.env.REPLICATE_API_BASE_URL;
+    replicateClient = new Replicate(baseUrl ? { auth: apiToken, baseUrl } : { auth: apiToken });
   }
   return replicateClient;
 }

@@ -18,6 +18,7 @@
 import type { Express, Request, Response } from "express";
 import { ENV } from "./env";
 import { pingDatabase } from "../db";
+import { getSweeperStatus, type SweeperStatus } from "../staleJobSweeper";
 
 export type CheckStatus = "ok" | "error" | "skipped";
 
@@ -37,6 +38,14 @@ export interface HealthReport {
   uptimeSeconds: number;
   environment: "production" | "development";
   checks: DependencyCheck[];
+  /**
+   * Background sweep state. Reported but deliberately not part of `status`:
+   * readiness answers "can this instance serve requests", and the sweep being
+   * off does not stop it serving. Its preconditions (database, Replicate
+   * token) are already required checks above, so a misconfiguration shows up
+   * there rather than flapping readiness from a background timer.
+   */
+  sweeper: SweeperStatus;
 }
 
 /**
@@ -140,6 +149,7 @@ export async function getHealthReport(): Promise<HealthReport> {
     uptimeSeconds: Math.round(process.uptime()),
     environment: ENV.isProduction ? "production" : "development",
     checks,
+    sweeper: getSweeperStatus(),
   };
 }
 

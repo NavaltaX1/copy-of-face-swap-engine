@@ -94,7 +94,7 @@ export const faceSwapRouter = router({
         }
 
         // Create job record in database
-        const jobResult = await createFaceSwapJob({
+        const jobId = await createFaceSwapJob({
           userId: ctx.user.id,
           sourceImageUrl: sourceImageResult.url,
           targetVideoUrl: targetImageResult?.url || null,
@@ -105,17 +105,6 @@ export const faceSwapRouter = router({
           visualStyle: input.visualStyle,
           nsfwEnabled: input.nsfwEnabled ? 1 : 0,
         });
-
-        const jobId = (jobResult as any).insertId as number | undefined;
-
-        // Without a real id, every update below would silently address row 0 -
-        // the job would look submitted and never change status again.
-        if (typeof jobId !== "number" || !Number.isInteger(jobId) || jobId <= 0) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Job was created but the database returned no insert id",
-          });
-        }
 
         // Submit to Replicate API
         try {

@@ -12,6 +12,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerHealthRoutes } from "./health";
 import { registerWebhookRoutes } from "../webhookRouter";
+import { startStaleJobSweeper } from "../staleJobSweeper";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { ENV, validateEnv } from "./env";
@@ -203,9 +204,13 @@ async function startServer() {
     });
   });
 
+  // Started after listen, so a sweep can never race the server's own startup.
+  const stopSweeper = startStaleJobSweeper();
+
   registerProcessHandlers(
     () =>
       new Promise<void>((resolve, reject) => {
+        stopSweeper();
         const timer = setTimeout(() => {
           console.warn(
             `[shutdown] Still draining after ${SHUTDOWN_TIMEOUT_MS}ms, forcing exit.`

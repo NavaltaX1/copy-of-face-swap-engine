@@ -77,6 +77,42 @@ Unknown predictions are answered `200 {"status":"ignored"}` rather than 404, so
 a callback that can never match a job does not get retried forever. A fault on
 our side answers 500, which is the one case worth retrying.
 
+## Background sweep for abandoned jobs
+
+A job only used to advance when a client asked about it. Two ways that stranded
+work: the output copy into storage fails (the job is left retryable, but only a
+poll retries it, and the upstream URL expires within the hour), or the webhook
+never arrives and nobody reopens the page.
+
+An in-process sweep now asks Replicate about anything in flight that has gone
+quiet and pushes it through the same completion path as the webhook and the
+poll. It claims each job with a conditional `UPDATE` first, so two replicas — or
+a sweep racing a client poll — cannot both download the same output.
+
+It is on whenever `DATABASE_URL` and `REPLICATE_API_TOKEN` are both set, and
+reports itself under `sweeper` in `/api/health`:
+
+```json
+{ "enabled": true, "runs": 3, "lastRunAt": "…", "lastRunMs": 120,
+  "lastResult": { "examined": 2, "claimed": 1, "completed": 1,
+                  "failed": 0, "stillWaiting": 0, "errors": 0 } }
+```
+
+When it is off, that object says why (`"reason": "DATABASE_URL is not set"`) —
+a sweep that silently is not running is the kind of thing noticed only after a
+job has been lost. Tunable with `STALE_JOB_SWEEP_INTERVAL_MS`,
+`STALE_JOB_STALE_AFTER_MS`, `STALE_JOB_SWEEP_BATCH`, and
+`STALE_JOB_SWEEP_ENABLED=false`.
+
+Deliberately a timer rather than the platform's heartbeat cron
+(`server/_core/heartbeat.ts`): that needs a publicly reachable
+`/api/scheduled/` endpoint whose callbacks carry no documented signature to
+verify, and it does not exist in a self-hosted container at all.
+
+`sweeper` is reported but is **not** part of the health `status`. Readiness
+answers "can this instance serve requests", and the sweep being off does not
+stop it serving — its preconditions are already required checks.
+
 ## Build-time vs runtime variables
 
 This is the setup's one sharp edge. **`VITE_*` variables are compiled into the
