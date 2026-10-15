@@ -3,10 +3,17 @@ import fs from "fs";
 import { type Server } from "http";
 import { nanoid } from "nanoid";
 import path from "path";
-import { createServer as createViteServer } from "vite";
-import viteConfig from "../../vite.config";
 
 export async function setupVite(app: Express, server: Server) {
+  // vite, and every plugin vite.config imports, are devDependencies. Importing
+  // either at module scope put them in the production bundle's static import
+  // list, so `node dist/index.js` against a production-only install died with
+  // ERR_MODULE_NOT_FOUND: Cannot find package 'vite' before reading a line of
+  // config. Importing vite dynamically keeps it out; the config is left to
+  // vite's own loader rather than imported, because a relative import would be
+  // bundled and drag the plugins back in with it.
+  const { createServer: createViteServer } = await import("vite");
+
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
@@ -14,8 +21,7 @@ export async function setupVite(app: Express, server: Server) {
   };
 
   const vite = await createViteServer({
-    ...viteConfig,
-    configFile: false,
+    configFile: path.resolve(import.meta.dirname, "../..", "vite.config.ts"),
     server: serverOptions,
     appType: "custom",
   });
@@ -53,9 +59,12 @@ export function serveStatic(app: Express) {
       ? path.resolve(import.meta.dirname, "../..", "dist", "public")
       : path.resolve(import.meta.dirname, "public");
   if (!fs.existsSync(distPath)) {
-    console.error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`
-    );
+    const message = `Could not find the build directory: ${distPath}, make sure to build the client first`;
+    // In production every page request would 404 or 500 against a missing
+    // index.html, so this is a broken deploy rather than a warning worth
+    // serving traffic through.
+    if (process.env.NODE_ENV === "production") throw new Error(message);
+    console.error(message);
   }
 
   app.use(express.static(distPath));

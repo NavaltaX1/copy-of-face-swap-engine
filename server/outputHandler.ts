@@ -54,28 +54,38 @@ export async function processCompletedJob(
 }
 
 /**
- * Get file size from URL (useful for validation)
+ * Get file size from URL (useful for validation).
+ *
+ * Returns null when the size cannot be determined - a failed HEAD request or a
+ * response with no content-length. It used to return 0 for both, which made
+ * every unknown size pass validateFileSize() as a 0-byte file.
  */
-export async function getFileSizeFromUrl(url: string): Promise<number> {
+export async function getFileSizeFromUrl(url: string): Promise<number | null> {
   try {
     const response = await fetch(url, { method: "HEAD" });
 
     if (!response.ok) {
-      throw new Error(`Failed to get file size: ${response.status}`);
+      console.error(`Failed to get file size for ${url}: ${response.status} ${response.statusText}`);
+      return null;
     }
 
     const contentLength = response.headers.get("content-length");
-    return contentLength ? parseInt(contentLength, 10) : 0;
+    if (!contentLength) return null;
+
+    const parsed = parseInt(contentLength, 10);
+    return Number.isFinite(parsed) ? parsed : null;
   } catch (error) {
     console.error("Error getting file size:", error);
-    return 0;
+    return null;
   }
 }
 
 /**
- * Validate file size (in bytes)
+ * Validate file size (in bytes). An unknown size is not a valid size, so null
+ * fails rather than passing by default.
  */
-export function validateFileSize(sizeInBytes: number, maxSizeInMB: number): boolean {
+export function validateFileSize(sizeInBytes: number | null, maxSizeInMB: number): boolean {
+  if (sizeInBytes === null) return false;
   const maxSizeInBytes = maxSizeInMB * 1024 * 1024;
   return sizeInBytes <= maxSizeInBytes;
 }

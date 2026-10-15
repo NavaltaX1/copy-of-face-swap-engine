@@ -3,6 +3,7 @@
  * Using the official Replicate Node.js SDK
  */
 
+import crypto from "node:crypto";
 import Replicate from "replicate";
 
 // Using codeplugtech/face-swap as default (fastest and most cost-effective)
@@ -135,22 +136,32 @@ export async function getAvailableModels(): Promise<
 }
 
 /**
- * Verify Replicate webhook signature (optional, for webhook security)
+ * Verify a Replicate webhook signature.
+ *
+ * Fails closed. The previous version returned true when REPLICATE_WEBHOOK_SECRET
+ * was unset, so the one configuration mistake that disables verification also
+ * made every unsigned request from anyone on the internet look authentic - and
+ * it called require() inside an ESM module, which throws, so the configured
+ * path never ran either.
  */
-export function verifyReplicateWebhook(
-  body: string,
-  signature: string
-): boolean {
-  // Replicate webhooks can be verified using the webhook secret
-  // For now, we'll accept all webhooks (production should verify)
+export function verifyReplicateWebhook(body: string, signature: string): boolean {
   const secret = process.env.REPLICATE_WEBHOOK_SECRET;
 
   if (!secret) {
-    console.warn("REPLICATE_WEBHOOK_SECRET not set - webhook verification skipped");
-    return true;
+    console.error(
+      "REPLICATE_WEBHOOK_SECRET not set - rejecting webhook. Set it to accept Replicate callbacks."
+    );
+    return false;
   }
 
-  const crypto = require("crypto");
-  const hash = crypto.createHmac("sha256", secret).update(body).digest("hex");
-  return hash === signature;
+  if (!signature) return false;
+
+  const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const providedBuffer = Buffer.from(signature, "utf8");
+
+  // timingSafeEqual throws on a length mismatch, so compare lengths first.
+  if (expectedBuffer.length !== providedBuffer.length) return false;
+
+  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }

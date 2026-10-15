@@ -19,6 +19,21 @@ import { submitFaceSwapPrediction, checkPredictionStatus } from "./replicateApi"
 import { processCompletedJob } from "./outputHandler";
 import { TRPCError } from "@trpc/server";
 
+/**
+ * The statuses the `faceSwapJobs.status` column accepts. Replicate's vocabulary
+ * is its own and can grow, so anything outside this set must not reach the
+ * database: MySQL either rejects the write or coerces it to an empty string,
+ * neither of which the UI can render.
+ */
+const JOB_STATUSES = ["pending", "queued", "processing", "completed", "failed"] as const;
+type JobStatus = (typeof JOB_STATUSES)[number];
+
+/** Replicate's in-flight statuses, mapped onto ours. */
+const REPLICATE_STATUS_MAP: Record<string, JobStatus> = {
+  starting: "processing",
+  processing: "processing",
+};
+
 export const faceSwapRouter = router({
   /**
    * Submit a new face swap job
@@ -91,7 +106,16 @@ export const faceSwapRouter = router({
           nsfwEnabled: input.nsfwEnabled ? 1 : 0,
         });
 
-        const jobId = (jobResult as any).insertId;
+        const jobId = (jobResult as any).insertId as number | undefined;
+
+        // Without a real id, every update below would silently address row 0 -
+        // the job would look submitted and never change status again.
+        if (typeof jobId !== "number" || !Number.isInteger(jobId) || jobId <= 0) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Job was created but the database returned no insert id",
+          });
+        }
 
         // Submit to Replicate API
         try {
@@ -127,6 +151,11 @@ export const faceSwapRouter = router({
           });
         }
       } catch (error) {
+        // Re-wrapping a TRPCError flattened its code to 500 and doubled its
+        // message, so a BAD_REQUEST or NOT_FOUND raised above reached the
+        // client as an unhelpful internal error.
+        if (error instanceof TRPCError) throw error;
+
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Failed to submit face swap job: ${(error as Error).message}`,
@@ -156,6 +185,10 @@ export const faceSwapRouter = router({
         });
       }
 
+      // Reported to the client when the upstream poll itself fails, so a
+      // stalled job can be told apart from one that is genuinely still working.
+      let statusCheckError: string | null = null;
+
       // If job is queued or processing, check status with Replicate
       if ((job.status === "queued" || job.status === "processing") && job.akoolJobId) {
         try {
@@ -174,16 +207,23 @@ export const faceSwapRouter = router({
               await updateFaceSwapJob(input.jobId, {
                 status: "completed",
                 outputVideoUrl: storedOutput.storageUrl,
+                errorMessage: null,
                 completedAt: new Date(),
               });
             } catch (storageError) {
-              console.error("Error storing output:", storageError);
-              // Still mark as completed but with error note
+              // The render succeeded upstream but the copy into our storage did
+              // not. Marking the job completed against the Replicate URL used
+              // to look fine until that URL expired, after which the download
+              // 404'd permanently - and todo.md requires downloads be served
+              // from our own storage, not an external one. Stay in `processing`
+              // with the cause recorded so the next poll retries the copy while
+              // the upstream URL is still alive.
+              const message = (storageError as Error).message;
+              console.error(`[faceSwap] Job ${input.jobId}: storing output failed:`, storageError);
+              statusCheckError = `Output storage failed, will retry: ${message}`;
               await updateFaceSwapJob(input.jobId, {
-                status: "completed",
-                outputVideoUrl: replicateStatus.output, // Fallback to Replicate URL
-                errorMessage: `Output storage failed: ${(storageError as Error).message}`,
-                completedAt: new Date(),
+                status: "processing",
+                errorMessage: statusCheckError,
               });
             }
           } else if (replicateStatus.status === "failed") {
@@ -197,25 +237,38 @@ export const faceSwapRouter = router({
               errorMessage: "Face swap prediction was canceled",
             });
           } else {
-            // Map Replicate status to our status
-            const statusMap: Record<string, any> = {
-              starting: "processing",
-              processing: "processing",
-            };
-            const mappedStatus = statusMap[replicateStatus.status] || replicateStatus.status;
-            if (mappedStatus !== job.status) {
+            // Map Replicate status to our status. An unrecognised one is left
+            // alone rather than written through: the column is an enum, so an
+            // unknown value is rejected or silently blanked.
+            const mappedStatus = REPLICATE_STATUS_MAP[replicateStatus.status];
+            if (!mappedStatus) {
+              statusCheckError = `Unrecognised upstream status: ${replicateStatus.status}`;
+              console.warn(`[faceSwap] Job ${input.jobId}: ${statusCheckError}`);
+            } else if (mappedStatus !== job.status) {
               await updateFaceSwapJob(input.jobId, {
                 status: mappedStatus,
               });
             }
           }
         } catch (error) {
-          console.error("Error checking Replicate status:", error);
+          // Logging alone left the client polling a job that reads "processing"
+          // forever with no sign the status check is the thing failing.
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[faceSwap] Job ${input.jobId}: status check failed:`, error);
+          statusCheckError = `Status check failed: ${message}`;
         }
       }
 
       const updatedJob = await getFaceSwapJobById(input.jobId);
-      return updatedJob;
+
+      if (!updatedJob) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Job disappeared while its status was being checked",
+        });
+      }
+
+      return { ...updatedJob, statusCheckError };
     }),
 
   /**
