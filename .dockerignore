@@ -1,0 +1,35 @@
+# Build context hygiene: everything here is either rebuilt inside the image,
+# host-specific, or a secret that must never be baked into a layer.
+
+.git
+.gitignore
+node_modules
+**/node_modules
+.pnpm-store
+
+dist
+build
+coverage
+*.tsbuildinfo
+
+# Secrets. .env.example is intentionally NOT ignored.
+.env
+.env.*
+!.env.example
+
+.vscode
+.idea
+*.swp
+*.log
+.DS_Store
+Thumbs.db
+
+.webdev
+.project-config.json
+client/public/__manus__/version.json
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+DOCKER.md

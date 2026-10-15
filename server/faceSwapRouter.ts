@@ -16,8 +16,23 @@ import {
 } from "./db";
 import { storagePut, storageGet } from "./storage";
 import { submitFaceSwapPrediction, checkPredictionStatus } from "./replicateApi";
-import { processCompletedJob } from "./outputHandler";
+import { finalizeFailedJob, finalizeSucceededJob } from "./jobCompletion";
 import { TRPCError } from "@trpc/server";
+
+/**
+ * The statuses the `faceSwapJobs.status` column accepts. Replicate's vocabulary
+ * is its own and can grow, so anything outside this set must not reach the
+ * database: MySQL either rejects the write or coerces it to an empty string,
+ * neither of which the UI can render.
+ */
+const JOB_STATUSES = ["pending", "queued", "processing", "completed", "failed"] as const;
+type JobStatus = (typeof JOB_STATUSES)[number];
+
+/** Replicate's in-flight statuses, mapped onto ours. */
+const REPLICATE_STATUS_MAP: Record<string, JobStatus> = {
+  starting: "processing",
+  processing: "processing",
+};
 
 export const faceSwapRouter = router({
   /**
@@ -79,7 +94,7 @@ export const faceSwapRouter = router({
         }
 
         // Create job record in database
-        const jobResult = await createFaceSwapJob({
+        const jobId = await createFaceSwapJob({
           userId: ctx.user.id,
           sourceImageUrl: sourceImageResult.url,
           targetVideoUrl: targetImageResult?.url || null,
@@ -90,8 +105,6 @@ export const faceSwapRouter = router({
           visualStyle: input.visualStyle,
           nsfwEnabled: input.nsfwEnabled ? 1 : 0,
         });
-
-        const jobId = (jobResult as any).insertId;
 
         // Submit to Replicate API
         try {
@@ -127,6 +140,11 @@ export const faceSwapRouter = router({
           });
         }
       } catch (error) {
+        // Re-wrapping a TRPCError flattened its code to 500 and doubled its
+        // message, so a BAD_REQUEST or NOT_FOUND raised above reached the
+        // client as an unhelpful internal error.
+        if (error instanceof TRPCError) throw error;
+
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Failed to submit face swap job: ${(error as Error).message}`,
@@ -156,66 +174,63 @@ export const faceSwapRouter = router({
         });
       }
 
+      // Reported to the client when the upstream poll itself fails, so a
+      // stalled job can be told apart from one that is genuinely still working.
+      let statusCheckError: string | null = null;
+
       // If job is queued or processing, check status with Replicate
       if ((job.status === "queued" || job.status === "processing") && job.akoolJobId) {
         try {
           const replicateStatus = await checkPredictionStatus(job.akoolJobId);
 
-          // Update job status if changed
+          // Terminal transitions go through jobCompletion, which the webhook
+          // route uses too, so the two paths cannot disagree about what "done"
+          // means - or about notifying the user, which nothing used to do.
           if (replicateStatus.status === "succeeded" && replicateStatus.output) {
-            try {
-              // Download output from Replicate and store in S3
-              const storedOutput = await processCompletedJob(
-                input.jobId,
-                ctx.user.id,
-                replicateStatus.output
-              );
-
-              await updateFaceSwapJob(input.jobId, {
-                status: "completed",
-                outputVideoUrl: storedOutput.storageUrl,
-                completedAt: new Date(),
-              });
-            } catch (storageError) {
-              console.error("Error storing output:", storageError);
-              // Still mark as completed but with error note
-              await updateFaceSwapJob(input.jobId, {
-                status: "completed",
-                outputVideoUrl: replicateStatus.output, // Fallback to Replicate URL
-                errorMessage: `Output storage failed: ${(storageError as Error).message}`,
-                completedAt: new Date(),
-              });
+            const outcome = await finalizeSucceededJob(job, replicateStatus.output);
+            if (outcome.kind === "storage_retry") {
+              statusCheckError = outcome.message;
             }
           } else if (replicateStatus.status === "failed") {
-            await updateFaceSwapJob(input.jobId, {
-              status: "failed",
-              errorMessage: replicateStatus.error || "Face swap processing failed",
-            });
+            await finalizeFailedJob(
+              job,
+              replicateStatus.error || "Face swap processing failed"
+            );
           } else if (replicateStatus.status === "canceled") {
-            await updateFaceSwapJob(input.jobId, {
-              status: "failed",
-              errorMessage: "Face swap prediction was canceled",
-            });
+            await finalizeFailedJob(job, "Face swap prediction was canceled");
           } else {
-            // Map Replicate status to our status
-            const statusMap: Record<string, any> = {
-              starting: "processing",
-              processing: "processing",
-            };
-            const mappedStatus = statusMap[replicateStatus.status] || replicateStatus.status;
-            if (mappedStatus !== job.status) {
+            // Map Replicate status to our status. An unrecognised one is left
+            // alone rather than written through: the column is an enum, so an
+            // unknown value is rejected or silently blanked.
+            const mappedStatus = REPLICATE_STATUS_MAP[replicateStatus.status];
+            if (!mappedStatus) {
+              statusCheckError = `Unrecognised upstream status: ${replicateStatus.status}`;
+              console.warn(`[faceSwap] Job ${input.jobId}: ${statusCheckError}`);
+            } else if (mappedStatus !== job.status) {
               await updateFaceSwapJob(input.jobId, {
                 status: mappedStatus,
               });
             }
           }
         } catch (error) {
-          console.error("Error checking Replicate status:", error);
+          // Logging alone left the client polling a job that reads "processing"
+          // forever with no sign the status check is the thing failing.
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[faceSwap] Job ${input.jobId}: status check failed:`, error);
+          statusCheckError = `Status check failed: ${message}`;
         }
       }
 
       const updatedJob = await getFaceSwapJobById(input.jobId);
-      return updatedJob;
+
+      if (!updatedJob) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Job disappeared while its status was being checked",
+        });
+      }
+
+      return { ...updatedJob, statusCheckError };
     }),
 
   /**

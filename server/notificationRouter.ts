@@ -7,7 +7,7 @@ import { router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
 import { notifications } from "../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 export const notificationRouter = router({
   /**
@@ -30,7 +30,10 @@ export const notificationRouter = router({
         .select()
         .from(notifications)
         .where(eq(notifications.userId, ctx.user.id))
-        .orderBy((t) => t.createdAt)
+        // Newest first. Ascending with limit 10 meant the notification centre
+        // showed the ten oldest, so a new notification never appeared for
+        // anyone who already had ten.
+        .orderBy(desc(notifications.createdAt))
         .limit(input.limit)
         .offset(input.offset);
 
