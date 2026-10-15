@@ -53,6 +53,30 @@ The `database` check runs a real `SELECT 1`; it does not merely confirm that
 production and `skipped` in development, so a local checkout with no Replicate
 token does not show red.
 
+## Webhooks
+
+`POST /api/webhooks/replicate` receives Replicate's completion callbacks. Point
+`WEBHOOK_URL` at it with a publicly reachable host:
+
+```
+WEBHOOK_URL=https://your-host.example.com/api/webhooks/replicate
+REPLICATE_WEBHOOK_SECRET=whsec_...
+```
+
+Two things to know:
+
+- **Verification fails closed.** With no `REPLICATE_WEBHOOK_SECRET`, every
+  callback is rejected with a 401. That is deliberate — the alternative is that
+  one unset variable turns the endpoint into "anyone may mark any job
+  complete". Job completion still works without it, through client polling.
+- **The route is mounted before the JSON body parser**, because signatures are
+  computed over the exact bytes sent. Do not put a proxy in front of it that
+  rewrites or re-serialises request bodies.
+
+Unknown predictions are answered `200 {"status":"ignored"}` rather than 404, so
+a callback that can never match a job does not get retried forever. A fault on
+our side answers 500, which is the one case worth retrying.
+
 ## Build-time vs runtime variables
 
 This is the setup's one sharp edge. **`VITE_*` variables are compiled into the

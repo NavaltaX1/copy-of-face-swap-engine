@@ -16,7 +16,7 @@ import {
 } from "./db";
 import { storagePut, storageGet } from "./storage";
 import { submitFaceSwapPrediction, checkPredictionStatus } from "./replicateApi";
-import { processCompletedJob } from "./outputHandler";
+import { finalizeFailedJob, finalizeSucceededJob } from "./jobCompletion";
 import { TRPCError } from "@trpc/server";
 
 /**
@@ -194,48 +194,21 @@ export const faceSwapRouter = router({
         try {
           const replicateStatus = await checkPredictionStatus(job.akoolJobId);
 
-          // Update job status if changed
+          // Terminal transitions go through jobCompletion, which the webhook
+          // route uses too, so the two paths cannot disagree about what "done"
+          // means - or about notifying the user, which nothing used to do.
           if (replicateStatus.status === "succeeded" && replicateStatus.output) {
-            try {
-              // Download output from Replicate and store in S3
-              const storedOutput = await processCompletedJob(
-                input.jobId,
-                ctx.user.id,
-                replicateStatus.output
-              );
-
-              await updateFaceSwapJob(input.jobId, {
-                status: "completed",
-                outputVideoUrl: storedOutput.storageUrl,
-                errorMessage: null,
-                completedAt: new Date(),
-              });
-            } catch (storageError) {
-              // The render succeeded upstream but the copy into our storage did
-              // not. Marking the job completed against the Replicate URL used
-              // to look fine until that URL expired, after which the download
-              // 404'd permanently - and todo.md requires downloads be served
-              // from our own storage, not an external one. Stay in `processing`
-              // with the cause recorded so the next poll retries the copy while
-              // the upstream URL is still alive.
-              const message = (storageError as Error).message;
-              console.error(`[faceSwap] Job ${input.jobId}: storing output failed:`, storageError);
-              statusCheckError = `Output storage failed, will retry: ${message}`;
-              await updateFaceSwapJob(input.jobId, {
-                status: "processing",
-                errorMessage: statusCheckError,
-              });
+            const outcome = await finalizeSucceededJob(job, replicateStatus.output);
+            if (outcome.kind === "storage_retry") {
+              statusCheckError = outcome.message;
             }
           } else if (replicateStatus.status === "failed") {
-            await updateFaceSwapJob(input.jobId, {
-              status: "failed",
-              errorMessage: replicateStatus.error || "Face swap processing failed",
-            });
+            await finalizeFailedJob(
+              job,
+              replicateStatus.error || "Face swap processing failed"
+            );
           } else if (replicateStatus.status === "canceled") {
-            await updateFaceSwapJob(input.jobId, {
-              status: "failed",
-              errorMessage: "Face swap prediction was canceled",
-            });
+            await finalizeFailedJob(job, "Face swap prediction was canceled");
           } else {
             // Map Replicate status to our status. An unrecognised one is left
             // alone rather than written through: the column is an enum, so an

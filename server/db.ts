@@ -121,6 +121,12 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export async function getUserById(userId: number) {
+  const db = await requireDb();
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
 /**
  * Face Swap Jobs queries
  */
@@ -133,6 +139,21 @@ export async function createFaceSwapJob(job: InsertFaceSwapJob) {
 export async function getFaceSwapJobById(jobId: number) {
   const db = await requireDb();
   const result = await db.select().from(faceSwapJobs).where(eq(faceSwapJobs.id, jobId)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+/**
+ * Look a job up by the upstream prediction id (stored in akoolJobId, named for
+ * the provider this started out on). Needed by the webhook route, which is told
+ * the prediction id and nothing about our own job ids.
+ */
+export async function getFaceSwapJobByPredictionId(predictionId: string) {
+  const db = await requireDb();
+  const result = await db
+    .select()
+    .from(faceSwapJobs)
+    .where(eq(faceSwapJobs.akoolJobId, predictionId))
+    .limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 

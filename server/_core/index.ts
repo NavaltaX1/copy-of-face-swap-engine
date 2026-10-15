@@ -11,6 +11,7 @@ import { HttpError } from "@shared/_core/errors";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerHealthRoutes } from "./health";
+import { registerWebhookRoutes } from "../webhookRouter";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { ENV, validateEnv } from "./env";
@@ -144,6 +145,12 @@ async function startServer() {
 
   const app = express();
   const server = createServer(app);
+
+  // Before the JSON parser on purpose: webhook signatures are computed over the
+  // exact bytes sent, and express.json() consumes the stream, after which the
+  // original body cannot be recovered.
+  registerWebhookRoutes(app);
+
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

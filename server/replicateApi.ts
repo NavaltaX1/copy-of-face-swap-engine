@@ -135,33 +135,107 @@ export async function getAvailableModels(): Promise<
   ];
 }
 
+/** How far a webhook timestamp may drift before it is treated as a replay. */
+const WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
+
+export interface ReplicateWebhookHeaders {
+  /** `webhook-id` */
+  id: string | undefined;
+  /** `webhook-timestamp`, unix seconds as a string */
+  timestamp: string | undefined;
+  /** `webhook-signature`, space-separated `v1,<base64>` entries */
+  signature: string | undefined;
+}
+
+export type WebhookVerification =
+  | { valid: true }
+  | { valid: false; reason: string };
+
 /**
- * Verify a Replicate webhook signature.
+ * Verify a Replicate webhook, which is signed per the Standard Webhooks spec:
  *
- * Fails closed. The previous version returned true when REPLICATE_WEBHOOK_SECRET
- * was unset, so the one configuration mistake that disables verification also
- * made every unsigned request from anyone on the internet look authentic - and
- * it called require() inside an ESM module, which throws, so the configured
- * path never ran either.
+ *   signed content = `${webhook-id}.${webhook-timestamp}.${raw body}`
+ *   signature      = base64(HMAC-SHA256(secret, signed content))
+ *   header         = `v1,<signature>` (space-separated, several during rotation)
+ *
+ * The secret arrives as `whsec_<base64 key>`; the key is the decoded part after
+ * the prefix, not the literal string.
+ *
+ * Three properties this needs to hold, each of which the previous placeholder
+ * implementation got wrong:
+ *
+ *  - It fails closed. Returning true when REPLICATE_WEBHOOK_SECRET was unset
+ *    meant the one configuration mistake that disables verification also made
+ *    every unsigned request from anyone on the internet look authentic.
+ *  - It signs over id and timestamp, not the body alone, so a captured request
+ *    cannot be replayed indefinitely.
+ *  - It compares in constant time, and survives a length mismatch, which makes
+ *    crypto.timingSafeEqual throw if handed straight to it.
+ *
+ * The raw request body must be passed byte-for-byte. A body that has been
+ * through JSON.parse and re-stringified will not match.
+ *
+ * NOTE: implemented to the published signature format; it has not been checked
+ * against a live Replicate callback. It fails closed, so a mistake here costs
+ * rejected webhooks rather than accepted forgeries - and job completion still
+ * works through polling.
  */
-export function verifyReplicateWebhook(body: string, signature: string): boolean {
+export function verifyReplicateWebhook(
+  headers: ReplicateWebhookHeaders,
+  rawBody: string
+): WebhookVerification {
   const secret = process.env.REPLICATE_WEBHOOK_SECRET;
 
   if (!secret) {
-    console.error(
-      "REPLICATE_WEBHOOK_SECRET not set - rejecting webhook. Set it to accept Replicate callbacks."
-    );
-    return false;
+    return { valid: false, reason: "REPLICATE_WEBHOOK_SECRET is not set" };
   }
 
-  if (!signature) return false;
+  const { id, timestamp, signature } = headers;
+  if (!id) return { valid: false, reason: "missing webhook-id header" };
+  if (!timestamp) return { valid: false, reason: "missing webhook-timestamp header" };
+  if (!signature) return { valid: false, reason: "missing webhook-signature header" };
 
-  const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
-  const expectedBuffer = Buffer.from(expected, "utf8");
-  const providedBuffer = Buffer.from(signature, "utf8");
+  const sentAt = Number(timestamp);
+  if (!Number.isFinite(sentAt)) {
+    return { valid: false, reason: "webhook-timestamp is not a number" };
+  }
 
-  // timingSafeEqual throws on a length mismatch, so compare lengths first.
-  if (expectedBuffer.length !== providedBuffer.length) return false;
+  const driftSeconds = Math.abs(Date.now() / 1000 - sentAt);
+  if (driftSeconds > WEBHOOK_TOLERANCE_SECONDS) {
+    return {
+      valid: false,
+      reason: `webhook-timestamp is ${Math.round(driftSeconds)}s away from now (tolerance ${WEBHOOK_TOLERANCE_SECONDS}s)`,
+    };
+  }
 
-  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+  // `whsec_` prefix is conventional; tolerate a raw key without it.
+  const keyMaterial = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
+  const key = Buffer.from(keyMaterial, "base64");
+  if (key.length === 0) {
+    return { valid: false, reason: "REPLICATE_WEBHOOK_SECRET is not valid base64" };
+  }
+
+  const expected = crypto
+    .createHmac("sha256", key)
+    .update(`${id}.${timestamp}.${rawBody}`)
+    .digest();
+
+  // Several signatures appear side by side while a secret is being rotated;
+  // any one matching is enough.
+  const candidates = signature
+    .split(" ")
+    .filter(part => part.startsWith("v1,"))
+    .map(part => part.slice("v1,".length));
+
+  if (candidates.length === 0) {
+    return { valid: false, reason: "no v1 signature in webhook-signature header" };
+  }
+
+  for (const candidate of candidates) {
+    const provided = Buffer.from(candidate, "base64");
+    if (provided.length !== expected.length) continue;
+    if (crypto.timingSafeEqual(provided, expected)) return { valid: true };
+  }
+
+  return { valid: false, reason: "no signature matched" };
 }
