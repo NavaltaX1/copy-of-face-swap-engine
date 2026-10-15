@@ -77,6 +77,34 @@ Unknown predictions are answered `200 {"status":"ignored"}` rather than 404, so
 a callback that can never match a job does not get retried forever. A fault on
 our side answers 500, which is the one case worth retrying.
 
+## Access control
+
+**Who can open the app.** `docker-compose.yml` publishes the app on
+`127.0.0.1` by default, so it answers only on the machine running it. Published
+as a bare `3000:3000` it listens on every interface, and anyone on the same
+network can open it and use somebody's logged-in session. Set
+`APP_BIND=0.0.0.0` only when you actually want that, and put a reverse proxy
+with TLS in front of it if you do.
+
+**Who can fetch a file.** `/manus-storage/*` serves uploads and finished
+renders. It previously took the path straight from the URL and asked the
+storage backend to sign it — no session, no ownership check — so anyone who
+could reach the server could fetch anyone's source photographs and output
+videos, and a link shared once worked forever for everyone. The paths are
+almost entirely predictable (`outputs/face-swaps/<userId>/job-<jobId>-<ts>_<hash>.mp4`),
+leaving only an 8-character suffix to guess.
+
+It now requires a valid session, refuses any key that is not a shape this app
+writes, and checks that the user id in the path is the caller's own (admins
+excepted). Both refusals answer **404**, not 403: a 403 would confirm that a
+given path exists and belongs to someone, which is enough to enumerate other
+people's jobs.
+
+A key worth remembering: the redirect target is a short-lived signed URL from
+the storage backend. Once handed out it works until it expires, for whoever
+holds it — the check governs who can *obtain* one, not what happens to it
+afterwards. Don't paste those URLs around.
+
 ## Background sweep for abandoned jobs
 
 A job only used to advance when a client asked about it. Two ways that stranded

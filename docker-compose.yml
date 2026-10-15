@@ -74,7 +74,10 @@ services:
       REPLICATE_WEBHOOK_SECRET: ${REPLICATE_WEBHOOK_SECRET:-}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
     ports:
-      - "${APP_PORT:-3000}:3000"
+      # Bound to loopback by default: published as "3000:3000" the app answers
+      # on every interface, so anyone on the same network - café wifi included -
+      # can open it. Set APP_BIND=0.0.0.0 deliberately if you want LAN access.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:3000"
 
   # One-shot. Runs to completion and exits; `app` waits for a clean exit.
   migrate:
